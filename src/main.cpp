@@ -1,9 +1,6 @@
 #include <Arduino.h>
 #include <Wire.h>
 #include <Adafruit_MCP4725.h>
-#include <Adafruit_GFX.h>
-#include <Adafruit_SSD1306.h>
-#include <SoftwareSerial.h>
 
 #define LED 8    // PIN 14 PB0
 #define CH1AT 9  // PIN 15 PB1
@@ -20,10 +17,6 @@
 Adafruit_MCP4725 DAC1;
 Adafruit_MCP4725 DAC2;
 
-#define SCREEN_WIDTH 128
-#define SCREEN_HEIGHT 64
-Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
-
 const float VREF = 5.0;
 
 float potValue1;
@@ -36,22 +29,25 @@ float voltage1input;
 float voltage2input;
 
 void displayData(const char *message, float voltage1, float voltage2, float outputVoltage1, float outputVoltage2);
+void setDACValues(float voltage1, float voltage2, float maxVoltage1, float maxVoltage2);
 
 unsigned long previousMillis = 0;
-const long interval = 1000; // Intervalo de 1 segundo
+const long interval = 500; // Intervalo de .5 segundo
 bool ledState = LOW;
 
-SoftwareSerial BTSerial(2, 3); // RX, TX
+int ch1state;
+int ch2state;
+int ch3state;
 
 void setup()
 {
-  Serial.begin(9600);
+
+  // Usamos el Serial para Bluetooth ya que está conectado a RX(0) y TX(1)
+  Serial.begin(9600); // Configuración del Bluetooth
 
   DAC1.begin(0x60);
   DAC2.begin(0x61);
 
-  display.begin(SSD1306_SWITCHCAPVCC, 0x3c);
-  display.clearDisplay();
 
   pinMode(LED, OUTPUT);
 
@@ -62,29 +58,50 @@ void setup()
   pinMode(RL1, OUTPUT);
   pinMode(RL2, OUTPUT);
 
-    digitalWrite(RL1, HIGH);
+  digitalWrite(ch1state, LOW);
+  digitalWrite(ch1state, LOW);
+  digitalWrite(ch1state, LOW);
+  delay(100);
+  digitalWrite(ch1state, HIGH);
+  digitalWrite(ch1state, HIGH);
+  digitalWrite(ch1state, HIGH);
+
+  // Iniciar con los relés en LOW para asegurarse de que están en NC
+  digitalWrite(RL1, HIGH);
+  delay(50); // Tiempo muerto entre la activación de cada relé
   digitalWrite(RL2, HIGH);
-  delay(1000);
+  delay(50);
   digitalWrite(RL1, LOW);
+  delay(50); // Tiempo muerto entre la activación de cada relé
   digitalWrite(RL2, LOW);
+  delay(50); // Tiempo muerto entre la activación de cada relé
+  digitalWrite(RL1, HIGH);
+  delay(50); // Tiempo muerto entre la activación de cada relé
+  digitalWrite(RL2, HIGH);
+  delay(50); // Tiempo muerto entre la activación de cada relé
+  digitalWrite(RL1, LOW);
+  delay(50); // Tiempo muerto entre la activación de cada relé
+  digitalWrite(RL2, LOW);
+  delay(50); // Tiempo muerto entre la activación de cada relé
+    // Puedes también forzar a cero el DAC si es necesario:
+  DAC1.setVoltage(0, false);
+  DAC2.setVoltage(0, false);
 
-  // BTSerial.begin(9600); // Configuración del Bluetooth
 }
-
 void loop()
 {
   int ch1state = digitalRead(CH1AT);
   int ch2state = digitalRead(CH2AT);
   int ch3state = digitalRead(CH3AT);
 
-  potValue1 = analogRead(POT1AT);
-  potValue2 = analogRead(POT2AT);
+  int potValue1 = analogRead(POT1AT);
+  int potValue2 = analogRead(POT2AT);
+
+  float voltage1 = potValue1 * (VREF / 1023.0);
+  float voltage2 = potValue2 * (VREF / 1023.0);
 
   potValue1input = analogRead(POT1INPUT);
   potValue2input = analogRead(POT2INPUT);
-
-  voltage1 = potValue1 * (VREF / 1023.0);
-  voltage2 = potValue2 * (VREF / 1023.0);
 
   voltage1input = potValue1input * (VREF / 1023.0);
   voltage2input = potValue2input * (VREF / 1023.0);
@@ -95,63 +112,47 @@ void loop()
     digitalWrite(RL2, HIGH);
     digitalWrite(LED, HIGH);
 
-    // 1/2 Velocidad (limitar si se supera el umbral de 2.5V para voltage1 y si es menor a 2.5V para voltage2)
-    float scaledVoltage1 = (voltage1 > 3.0) ? 3.0 : voltage1;
-    float scaledVoltage2 = (voltage2 > 2.50) ? 2.50 : voltage2;
+    // Actuar si el voltaje de los potenciómetros sobrepasa el umbral de 1.55V y 1.77V
+    if (voltage1 > 2.50 || voltage2 > 2.72) {
+      setDACValues(voltage1, voltage2, 2.50, 2.72); // Limitar el valor máximo del DAC
+    } else {
+      setDACValues(voltage1, voltage2, voltage1, voltage2); // Pasar directamente los valores del potenciómetro al DAC
+    }
 
-    // Convertir los voltajes escalados a vlores de DAC (0-4095)
-    int dacValue1 = (int)((scaledVoltage1 / VREF) * 4095);
-    int dacValue2 = (int)((scaledVoltage2 / VREF) * 4095);
-
-    DAC1.setVoltage(dacValue1, false);
-    DAC2.setVoltage(dacValue2, false);
-
-    displayData("CH1 Activo - Peaton", voltage1, voltage2, scaledVoltage1, scaledVoltage2);
+    displayData("CH1 Activo - Peaton", voltage1, voltage2, voltage1input, voltage2input);
   }
   else if (ch2state == LOW)
   {
-
     digitalWrite(RL1, HIGH);
     digitalWrite(RL2, HIGH);
     digitalWrite(LED, HIGH);
 
-    // 1/4 Velocidad (limitar si se supera el umbral de 1.25V para voltage1 y si es menor a 3.75V para voltage2)
-    float scaledVoltage1 = (voltage1 > 3.0) ? 3.0 : voltage1;
-    float scaledVoltage2 = (voltage2 > 2.50) ? 2.50 : voltage2;
+    // Actuar en base a otro umbral para CH2
+    setDACValues(voltage1, voltage2, 1.25, 3.75);
 
-    int dacValue1 = (int)((scaledVoltage1 / VREF) * 4095);
-    int dacValue2 = (int)((scaledVoltage2 / VREF) * 4095);
-
-    DAC1.setVoltage(dacValue1, false);
-    DAC2.setVoltage(dacValue2, false);
-
-    displayData("CH2 Activo - Monta", voltage1, voltage2, scaledVoltage1, scaledVoltage2);
+    displayData("CH2 Activo - Monta", voltage1, voltage2, voltage1input, voltage2input);
   }
   else if (ch3state == LOW)
   {
-
     digitalWrite(RL1, HIGH);
     digitalWrite(RL2, HIGH);
     digitalWrite(LED, HIGH);
 
-    // 3/4 Velocidad (limitar si se supera el umbral de 3.75V para voltage1 y si es menor a 1.25V para voltage2)
-    float scaledVoltage1 = (voltage1 > 3.0) ? 3.0 : voltage1;
-    float scaledVoltage2 = (voltage2 > 2.50) ? 2.50 : voltage2;
+    // Actuar en base a otro umbral para CH3
+    setDACValues(voltage1, voltage2, 3.75, 1.25);
 
-    int dacValue1 = (int)((scaledVoltage1 / VREF) * 4095);
-    int dacValue2 = (int)((scaledVoltage2 / VREF) * 4095);
-
-    DAC1.setVoltage(dacValue1, false);
-    DAC2.setVoltage(dacValue2, false);
-
-    displayData("CH3 Activo - Zona", voltage1, voltage2, scaledVoltage1, scaledVoltage2);
+    displayData("CH3 Activo - Zona", voltage1, voltage2, voltage1input, voltage2input);
   }
   else
   {
     digitalWrite(RL1, LOW);
     digitalWrite(RL2, LOW);
-
+    digitalWrite(LED, HIGH);
     unsigned long currentMillis = millis();
+
+    // Puedes también forzar a cero el DAC si es necesario:
+    DAC1.setVoltage(0, false);
+    DAC2.setVoltage(0, false);
 
     if (currentMillis - previousMillis >= interval)
     {
@@ -163,57 +164,41 @@ void loop()
     displayData("Sin Limite", voltage1input, voltage2input, voltage1input, voltage2input);
   }
 
-  delay(100);
+  delay(500);
 }
+
+void setDACValues(float voltage1, float voltage2, float maxVoltage1, float maxVoltage2)
+{
+  // Limitar el voltaje solo si sobrepasa los máximos permitidos
+  float scaledVoltage1 = (voltage1 > maxVoltage1) ? maxVoltage1 : voltage1;
+  float scaledVoltage2 = (voltage2 > maxVoltage2) ? maxVoltage2 : voltage2;
+
+  int dacValue1 = (int)((scaledVoltage1 / VREF) * 4095); // Escalar para el DAC
+  int dacValue2 = (int)((scaledVoltage2 / VREF) * 4095); // Escalar para el DAC
+
+  DAC1.setVoltage(dacValue1, false);
+  DAC2.setVoltage(dacValue2, false);
+}
+
 
 void displayData(const char *message, float voltage1, float voltage2, float outputVoltage1, float outputVoltage2)
 {
-  display.clearDisplay();
-  display.setTextSize(1);
-  display.setTextColor(SSD1306_WHITE);
+  Serial.println(message);
+  Serial.print("Pot1 In: ");
+  Serial.print(voltage1);
+  Serial.println("V");
 
-  display.setCursor(0, 0);
-  display.print(message);
+  Serial.print("Pot2 In: ");
+  Serial.print(voltage2);
+  Serial.println("V");
 
-  display.setCursor(0, 10);
-  display.print("Pot1 In: ");
-  display.print(voltage1);
-  display.print("V");
+  Serial.print("DAC1 Out: ");
+  Serial.print(outputVoltage1);
+  Serial.println("V");
 
-  display.setCursor(0, 20);
-  display.print("Pot2 In: ");
-  display.print(voltage2);
-  display.print("V");
+  Serial.print("DAC2 Out: ");
+  Serial.print(outputVoltage2);
+  Serial.println("V");
 
-  display.setCursor(0, 30);
-  display.print("DAC1 Out: ");
-  display.print(outputVoltage1);
-  display.print("V");
-
-  display.setCursor(0, 40);
-  display.print("DAC2 Out: ");
-  display.print(outputVoltage2);
-  display.print("V");
-
-  display.display();
-  /*
-    BTSerial.println(message);
-    BTSerial.print("Pot1 In: ");
-    BTSerial.print(voltage1);
-    BTSerial.println("V");
-
-    BTSerial.print("Pot2 In: ");
-    BTSerial.print(voltage2);
-    BTSerial.println("V");
-
-    BTSerial.print("DAC1 Out: ");
-    BTSerial.print(outputVoltage1);
-    BTSerial.println("V");
-
-    BTSerial.print("DAC2 Out: ");
-    BTSerial.print(outputVoltage2);
-    BTSerial.println("V");
-
-    BTSerial.println("-----------------------------"); // Separador
-    */
+  Serial.println("-----------------------------");
 }
